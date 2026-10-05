@@ -43,6 +43,7 @@ class ConsoleCase(unittest.TestCase):
             "residual",
             "quota",
             "intake",
+            "intake-quality",
             "ph",
             "inventory",
         })
@@ -55,6 +56,8 @@ class ConsoleCase(unittest.TestCase):
                 "pipeline",
                 "store",
                 "intake",
+                "intake_quality",
+                "intake_valve",
                 "coag",
                 "chlor",
                 "filter",
@@ -124,8 +127,16 @@ class ConsoleCase(unittest.TestCase):
         status, body = self.call("POST", "/intake/flow", {"flow": 1200, "turbidity": 3.0})
         self.assertEqual(status, 200)
         self.assertEqual(body["flow"], 1200.0)
+        self.assertEqual(body["quality"], "accepted")
+        self.assertTrue(body["recorded"])
         status, body = self.call("GET", "/intake/flow")
         self.assertEqual(body["flow"], 1200.0)
+        self.assertEqual(body["quality"], "accepted")
+
+        status, body = self.call("POST", "/intake/flow", {"flow": 2000.0})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["quality"], "spike_discarded")
+        self.assertFalse(body["recorded"])
 
         status, body = self.call("POST", "/coag/dose", {"flow": 1500})
         self.assertEqual(status, 200)
@@ -148,6 +159,28 @@ class ConsoleCase(unittest.TestCase):
         status, body = self.call("POST", "/clearwell/level", {"target": 12.0})
         self.assertEqual(body["level"], 12.0)
         self.assertEqual(body["min_level"], 0.0)
+
+    def test_intake_quality_and_valve_routes(self) -> None:
+        status, body = self.call("POST", "/intake/flow", {"flow": -10.0})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["quality"], "invalid")
+        self.assertFalse(body["usable"])
+        self.assertFalse(body["recorded"])
+        for _ in range(2):
+            status, body = self.call("POST", "/intake/flow", {"flow": -10.0})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["meter_fault"])
+        self.assertEqual(body["valve"]["position"], "safe")
+
+        _, quality = self.call("GET", "/intake/quality")
+        self.assertEqual(quality["quality"], "meter_fault")
+        _, valve = self.call("GET", "/intake/valve")
+        self.assertEqual(valve["position"], "safe")
+
+        status, body = self.call("POST", "/intake/flow", {"flow": 1.0})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["quality"], "recovered")
+        self.assertEqual(body["valve"]["position"], "open")
 
     def test_filter_and_backwash_routes(self) -> None:
         for bed_id, zone, load in (("b1", 1, 4.0), ("b2", 2, 9.0), ("b3", 3, 1.0)):
@@ -275,7 +308,7 @@ class ConsoleCase(unittest.TestCase):
         self.assertEqual(body["due"], ["b2"])
 
     def test_trend_and_audit_totals_routes(self) -> None:
-        for flow in (100.0, 200.0, 300.0):
+        for flow in (100.0, 105.0, 110.0):
             self.call("POST", "/intake/flow", {"flow": flow})
         status, body = self.call("GET", "/intake/trend")
         self.assertEqual(status, 200)
@@ -290,8 +323,8 @@ class ConsoleCase(unittest.TestCase):
         _, body = self.call("GET", "/intake/trend")
         self.assertEqual(body["samples"], 0)
 
-        self.call("POST", "/coag/dose", {"flow": 5.0})
-        self.call("POST", "/coag/dose", {"flow": 7.0})
+        self.call("POST", "/coag/dose", {"flow": 5.0, "expected_flow": 5.0})
+        self.call("POST", "/coag/dose", {"flow": 7.0, "expected_flow": 7.0})
         self.call("POST", "/chlor/dose", {})
         status, body = self.call("GET", "/audit/totals")
         self.assertEqual(status, 200)

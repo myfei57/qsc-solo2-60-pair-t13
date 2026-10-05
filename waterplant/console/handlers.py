@@ -18,6 +18,7 @@ from waterplant.scheduler import validate_threshold
 from waterplant.store import export_state
 
 from . import checks, history, ops
+from .intake_api import pump_context
 from . import describe as describe_module
 from . import simulate as simulate_module
 from . import snapshot as snapshot_module
@@ -107,22 +108,45 @@ def history_clear(server: "Server", request: Request) -> Response:
 
 def intake_flow(server: "Server", request: Request) -> Response:
     sensor = Sensor.from_payload(request.payload)
-    validate_flow(sensor.flow)
-    server.runtime.flow_repository.record(sensor)
-    server.runtime.trend.record(sensor.flow)
-    return json_response({"flow": sensor.flow, "turbidity": sensor.turbidity})
+    report = server.runtime.acquisition.collect(sensor, pump_context(request))
+    return json_response(report.as_dict())
+
+
+def intake_quality(server: "Server", request: Request) -> Response:
+    return json_response(server.runtime.acquisition.quality().as_dict())
+
+
+def intake_valve(server: "Server", request: Request) -> Response:
+    return json_response(server.runtime.intake_valve.state())
 
 
 def intake_flow_get(server: "Server", request: Request) -> Response:
     value, present = server.runtime.flow_repository.load_flow()
-    return json_response({"flow": value, "ok": present})
+    quality = server.runtime.acquisition.quality()
+    return json_response(
+        {
+            "flow": value,
+            "ok": present,
+            "quality": quality.quality.value,
+            "meter_fault": quality.meter_fault,
+        }
+    )
 
 
 def coag_dose(server: "Server", request: Request) -> Response:
     flow = request.float_field("flow")
     validate_flow(flow)
-    dose = server.runtime.coag_doser.update_flow_and_dose(flow)
-    return json_response({"dose": dose})
+    acquisition = server.runtime.acquisition.collect(
+        Sensor(flow=flow, turbidity=server.runtime.flow_repository.turbidity()),
+        pump_context(request),
+    )
+    if acquisition.recorded:
+        dose = server.runtime.coag_doser.apply_dose(flow)
+    else:
+        dose = 0.0
+    payload = acquisition.as_dict()
+    payload["dose"] = dose
+    return json_response(payload)
 
 
 def coag_turbidity(server: "Server", request: Request) -> Response:

@@ -5,10 +5,11 @@ from __future__ import annotations
 from waterplant.clearwell import validate_level
 from waterplant.filter import validate_zone
 from waterplant.flow import validate_factor
-from waterplant.intake import Sensor, mix, validate_flow
+from waterplant.intake import Sensor, mix
 from waterplant.quota import validate_amount
 
 from .http import Request, Response, json_response
+from .intake_api import pump_context
 from .runtime import Runtime
 
 
@@ -23,20 +24,28 @@ def run_cycle(rt: Runtime, request: Request) -> Response:
     zone = request.int_field("zone")
     amount = request.float_field("amount")
 
-    validate_flow(flow)
     validate_factor(rt.calibration.current())
     validate_zone(zone)
     validate_amount(amount)
     validate_level(level)
 
-    rt.flow_repository.record(Sensor(flow=flow, turbidity=mix(samples)))
-    rt.trend.record(flow)
-    coag_dose = rt.coag_doser.update_flow_and_dose(flow)
+    pump = pump_context(request)
+    acquisition = rt.acquisition.collect(
+        Sensor(flow=flow, turbidity=mix(samples)), pump
+    )
+
+    # Flow-based calculation starts only after plausibility is settled.
+    coag_dose = (
+        rt.coag_doser.update_flow_and_dose(flow) if acquisition.recorded else 0.0
+    )
     turb_dose = rt.sampler.judge(samples)
     ph_verdict = rt.stabilizer.stabilize()
     rt.well.update_residual_demand(demand)
     chlor_dose = rt.chlor_doser.apply_residual() if ph_verdict.stable else 0.0
-    min_level = rt.well.adjust_level(level, rt.inlet, rt.outlet)
+    if acquisition.verdict.meter_fault:
+        min_level = rt.well.level()
+    else:
+        min_level = rt.well.adjust_level(level, rt.inlet, rt.outlet)
     rotation = rt.backwash.order_rotation()
     duty = rt.bank.on_duty()
     if bed_id:
@@ -58,5 +67,9 @@ def run_cycle(rt: Runtime, request: Request) -> Response:
             "audit_count": rt.auditor.count(),
             "ph_stable": ph_verdict.stable,
             "ph_adjustment": ph_verdict.adjustment,
+            "intake_quality": acquisition.verdict.quality.value,
+            "intake_recorded": acquisition.recorded,
+            "intake_meter_fault": acquisition.verdict.meter_fault,
+            "intake_valve": acquisition.valve.as_dict(),
         }
     )

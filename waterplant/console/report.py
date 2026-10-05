@@ -21,6 +21,8 @@ def text_report(rt: Runtime) -> str:
         f"pipeline stages={line.count()} contains_filter={line.contains(Stage.FILTER)}",
         f"store: {describe['store']}",
         f"intake: {describe['intake']}",
+        f"intake quality: {describe['intake_quality']}",
+        f"intake valve: {describe['intake_valve']}",
         f"coagulant: {describe['coag']}",
         f"chlorine: {describe['chlor']}",
         f"filter: {describe['filter']}",

@@ -45,7 +45,12 @@ class Doser:
         """Persist the new flow, then dose against the value just written."""
 
         self._flow.persist_flow(value)
-        dose = self.dose_from_persisted_flow()
+        return self.apply_dose(value)
+
+    def apply_dose(self, value: float) -> float:
+        """Audit and return a dose for a value already accepted by acquisition."""
+
+        dose = self.dose_for_flow(value)
         self._auditor.record(COAGULANT, f"{dose:.4f}")
         return dose
 

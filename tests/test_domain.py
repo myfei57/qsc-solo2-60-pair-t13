@@ -13,8 +13,21 @@ from waterplant.clearwell import Well, validate_level
 from waterplant.coag import Doser as CoagDoser
 from waterplant.filter import Bank, validate_zone
 from waterplant.flow import Calibration, calibrate_meter, validate_factor
-from waterplant.intake import FlowRepository, InletController, Sensor, mix, validate_flow
-from waterplant.intake import Trend
+from waterplant.intake import (
+    FAILURE_SAMPLES,
+    AcquisitionService,
+    AcquisitionState,
+    FlowQualityMonitor,
+    FlowRepository,
+    InletController,
+    IntakeValve,
+    PumpContext,
+    Quality,
+    Sensor,
+    Trend,
+    mix,
+    validate_flow,
+)
 from waterplant.inventory import Inventory, Lot, validate_quantity
 from waterplant.ns import Stage, treatment_line
 from waterplant.ph import Stabilizer, validate_ph
@@ -123,6 +136,90 @@ class IntakeCase(unittest.TestCase):
         controller = InletController()
         self.assertEqual(controller.raise_level(1.0, 2.0), 3.0)
         self.assertEqual(controller.lower_level(1.0, 5.0), 0.0)
+
+
+class FlowAcquisitionCase(unittest.TestCase):
+    def _service(self, store: Store) -> AcquisitionService:
+        repository = FlowRepository(store)
+        return AcquisitionService(repository, Trend(store), IntakeValve(store), Auditor(store))
+
+    def test_steady_spike_is_discarded_and_does_not_update_trend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            service = self._service(store)
+            for flow in (100.0, 101.0):
+                report = service.collect(Sensor(flow=flow, turbidity=1.0))
+                self.assertTrue(report.recorded)
+            report = service.collect(Sensor(flow=150.0, turbidity=1.0))
+            self.assertEqual(report.verdict.quality, Quality.SPIKE_DISCARDED)
+            self.assertFalse(report.recorded)
+            self.assertEqual(FlowRepository(store).load_flow(), (101.0, True))
+            self.assertEqual(Trend(store).values(), [100.0, 101.0])
+
+    def test_pump_switch_spikes_are_marked_before_new_group_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            service = self._service(store)
+            service.collect(Sensor(flow=100.0))
+            context = PumpContext.from_values(group="B")
+            first = service.collect(Sensor(flow=180.0), context)
+            second = service.collect(Sensor(flow=190.0), context)
+            self.assertEqual(first.verdict.quality, Quality.SPIKE_OBSERVED)
+            self.assertEqual(second.verdict.quality, Quality.SPIKE_OBSERVED)
+            self.assertFalse(first.recorded or second.recorded)
+            third = service.collect(Sensor(flow=190.0), context)
+            self.assertEqual(third.verdict.quality, Quality.ACCEPTED)
+            self.assertTrue(third.recorded)
+
+    def test_three_uncorroborated_low_readings_are_a_meter_fault(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            service = self._service(store)
+            service.collect(Sensor(flow=100.0))
+            reports = [service.collect(Sensor(flow=20.0)) for _ in range(FAILURE_SAMPLES)]
+            self.assertEqual([report.verdict.quality for report in reports[:-1]], [Quality.SUSPECT_LOW] * 2)
+            self.assertEqual(reports[-1].verdict.quality, Quality.METER_FAULT)
+            self.assertEqual(IntakeValve(store).position().value, "safe")
+            repeated = service.collect(Sensor(flow=-1.0))
+            self.assertEqual(repeated.verdict.quality, Quality.METER_FAULT)
+            self.assertFalse(repeated.valve.changed)
+
+    def test_pump_indicated_low_flow_is_treated_as_real_reduction(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            service = self._service(store)
+            service.collect(Sensor(flow=100.0))
+            report = service.collect(
+                Sensor(flow=20.0), PumpContext.from_values(expected_flow=20.0)
+            )
+            self.assertEqual(report.verdict.quality, Quality.REAL_REDUCTION)
+            self.assertTrue(report.recorded)
+            self.assertEqual(service.quality().baseline, 20.0)
+
+    def test_recovery_reopens_valve_once_and_repeated_triggers_are_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store.open(f"{tmp}/state.json")
+            service = self._service(store)
+            service.collect(Sensor(flow=100.0))
+            for _ in range(FAILURE_SAMPLES):
+                service.collect(Sensor(flow=10.0))
+            recovered = service.collect(Sensor(flow=100.0))
+            self.assertEqual(recovered.verdict.quality, Quality.RECOVERED)
+            self.assertTrue(recovered.valve.changed)
+            repeated = service.collect(Sensor(flow=100.0))
+            self.assertEqual(repeated.verdict.quality, Quality.ACCEPTED)
+            self.assertFalse(repeated.valve.changed)
+            self.assertEqual(IntakeValve(store).position().value, "open")
+
+    def test_pure_classifier_rules_are_consistent(self) -> None:
+        monitor = FlowQualityMonitor()
+        state = AcquisitionState()
+        state, first = monitor.read(state, 100.0, 0.0, PumpContext())
+        state, spike = monitor.read(state, 200.0, 0.0, PumpContext())
+        self.assertEqual(first.quality, Quality.ACCEPTED)
+        self.assertEqual(spike.quality, Quality.SPIKE_DISCARDED)
+        self.assertEqual(first.accepted_flow, 100.0)
+        self.assertIsNone(spike.accepted_flow)
 
 
 class DosingCase(unittest.TestCase):

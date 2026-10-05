@@ -9,7 +9,13 @@ from waterplant.clearwell import Well
 from waterplant.coag import Doser as CoagDoser
 from waterplant.filter import Bank
 from waterplant.flow import Calibration
-from waterplant.intake import FlowRepository, InletController, Trend
+from waterplant.intake import (
+    AcquisitionService,
+    FlowRepository,
+    InletController,
+    IntakeValve,
+    Trend,
+)
 from waterplant.inventory import Inventory
 from waterplant.ph import Stabilizer
 from waterplant.quota import Accumulator
@@ -40,4 +46,8 @@ class Runtime:
         self.stabilizer = Stabilizer(store)
         self.scheduler = Scheduler(store)
         self.trend = Trend(store)
+        self.intake_valve = IntakeValve(store)
+        self.acquisition = AcquisitionService(
+            self.flow_repository, self.trend, self.intake_valve, self.auditor
+        )
         self.inventory = Inventory(store)

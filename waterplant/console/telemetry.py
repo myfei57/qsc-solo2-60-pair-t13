@@ -28,6 +28,9 @@ class Telemetry:
     ph_stable: bool
     schedule_due: int
     trend_samples: int
+    intake_quality: str
+    intake_meter_fault: bool
+    intake_valve_safe: bool
     inventory_balance: float
     inventory_alerts: int
 
@@ -50,6 +53,9 @@ class Telemetry:
             "ph_stable": self.ph_stable,
             "schedule_due": self.schedule_due,
             "trend_samples": self.trend_samples,
+            "intake_quality": self.intake_quality,
+            "intake_meter_fault": self.intake_meter_fault,
+            "intake_valve_safe": self.intake_valve_safe,
             "inventory_balance": self.inventory_balance,
             "inventory_alerts": self.inventory_alerts,
         }
@@ -58,6 +64,7 @@ class Telemetry:
 def collect(rt: Runtime) -> Telemetry:
     """Read every counter without mutating the control state."""
 
+    quality = rt.acquisition.quality()
     return Telemetry(
         store_keys=rt.store.count(),
         filter_beds=rt.bank.count(),
@@ -76,6 +83,9 @@ def collect(rt: Runtime) -> Telemetry:
         ph_stable=rt.stabilizer.is_stable(),
         schedule_due=len(rt.scheduler.due(rt.bank)),
         trend_samples=rt.trend.stats().samples,
+        intake_quality=quality.quality.value,
+        intake_meter_fault=quality.meter_fault,
+        intake_valve_safe=rt.intake_valve.state()["safe"] is True,
         inventory_balance=rt.inventory.balance(),
         inventory_alerts=len(rt.inventory.needs_reorder()),
     )

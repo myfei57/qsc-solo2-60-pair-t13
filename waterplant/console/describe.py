@@ -8,6 +8,14 @@ from waterplant.store import describe_store
 from .runtime import Runtime
 
 
+def _describe_quality(rt: Runtime) -> str:
+    quality = rt.acquisition.quality()
+    return (
+        f"intake quality={quality.quality.value} baseline={quality.baseline:.4f} "
+        f"fault={quality.meter_fault} pump_group={quality.pump_group}"
+    )
+
+
 def collect(rt: Runtime) -> dict[str, str]:
     """Return one description line per component."""
 
@@ -15,6 +23,8 @@ def collect(rt: Runtime) -> dict[str, str]:
         "pipeline": treatment_line().describe(),
         "store": describe_store(rt.store),
         "intake": rt.flow_repository.describe(),
+        "intake_quality": _describe_quality(rt),
+        "intake_valve": rt.intake_valve.describe(),
         "coag": rt.coag_doser.describe(),
         "chlor": rt.chlor_doser.describe(),
         "filter": rt.bank.describe(),

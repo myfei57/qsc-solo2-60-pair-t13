@@ -18,6 +18,10 @@ class FlowRepository:
     def __init__(self, store: Store) -> None:
         self._store = store
 
+    @property
+    def store(self) -> Store:
+        return self._store
+
     def persist_flow(self, value: float) -> None:
         """Write the flow reading before anything downstream consumes it."""
 

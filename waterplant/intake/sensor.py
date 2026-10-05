@@ -9,8 +9,8 @@ from dataclasses import dataclass
 class Sensor:
     """A single flow and turbidity observation."""
 
-    flow: float
-    turbidity: float
+    flow: float = 0.0
+    turbidity: float = 0.0
 
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> "Sensor":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -20,6 +21,8 @@ class FlowState:
 def validate_flow(value: float) -> None:
     """Reject flow readings outside the supported instrument range."""
 
+    if not math.isfinite(value):
+        raise ValueError("flow must be a finite number")
     if value < 0:
         raise ValueError("flow must be non-negative")
     if value > 1_000_000:
