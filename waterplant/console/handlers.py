@@ -107,15 +107,81 @@ def history_clear(server: "Server", request: Request) -> Response:
 
 def intake_flow(server: "Server", request: Request) -> Response:
     sensor = Sensor.from_payload(request.payload)
-    validate_flow(sensor.flow)
-    server.runtime.flow_repository.record(sensor)
-    server.runtime.trend.record(sensor.flow)
-    return json_response({"flow": sensor.flow, "turbidity": sensor.turbidity})
+    report = server.runtime.acquisition.ingest(sensor)
+    payload = report.as_dict()
+    # Keep the historical response fields for older console clients.
+    payload["flow"] = report.sensor.flow
+    payload["turbidity"] = report.sensor.turbidity
+    return json_response(payload)
 
 
 def intake_flow_get(server: "Server", request: Request) -> Response:
     value, present = server.runtime.flow_repository.load_flow()
-    return json_response({"flow": value, "ok": present})
+    raw, raw_present = server.runtime.flow_repository.load_raw_flow()
+    return json_response(
+        {"flow": value, "raw": raw if raw_present else value, "ok": present}
+    )
+
+
+def intake_quality(server: "Server", request: Request) -> Response:
+    runtime = server.runtime
+    return json_response(
+        {
+            "quality": runtime.gate.state(),
+            "suspects": runtime.gate.suspects(),
+            "valve": runtime.intake_valve.state(),
+        }
+    )
+
+
+def intake_quality_reset(server: "Server", request: Request) -> Response:
+    server.runtime.acquisition.reset_quality()
+    return json_response({"reset": True, "quality": server.runtime.gate.state()})
+
+
+def intake_suspects(server: "Server", request: Request) -> Response:
+    return json_response({"suspects": server.runtime.gate.suspects()})
+
+
+def pump_groups(server: "Server", request: Request) -> Response:
+    runtime = server.runtime
+    groups = [group.as_dict() for group in runtime.pump_groups.groups()]
+    active = runtime.pump_groups.active()
+    return json_response(
+        {"groups": groups, "active": "" if active is None else active.id}
+    )
+
+
+def pump_group_configure(server: "Server", request: Request) -> Response:
+    runtime = server.runtime
+    group = runtime.pump_groups.configure(
+        request.str_field("id"),
+        request.int_field("pumps"),
+        request.float_field("nominal_flow"),
+        request.str_field("spike_policy", "drop"),
+    )
+    return json_response({"group": group.as_dict()})
+
+
+def pump_group_switch(server: "Server", request: Request) -> Response:
+    runtime = server.runtime
+    group, changed = runtime.acquisition.switch_pumps(request.str_field("id"))
+    return json_response(
+        {
+            "active": group.id,
+            "changed": changed,
+            "quality": runtime.gate.state(),
+        }
+    )
+
+
+def intake_valve_state(server: "Server", request: Request) -> Response:
+    return json_response(server.runtime.intake_valve.state())
+
+
+def intake_valve_command(server: "Server", request: Request) -> Response:
+    action = server.runtime.intake_valve.command(request.float_field("position"))
+    return json_response(action.as_dict())
 
 
 def coag_dose(server: "Server", request: Request) -> Response:

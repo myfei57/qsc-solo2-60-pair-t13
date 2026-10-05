@@ -25,6 +25,25 @@ def run_checks(rt: Runtime) -> list[dict[str, str]]:
         checks.append({"name": "intake", "status": "ok", "detail": "flow reading present"})
     else:
         checks.append({"name": "intake", "status": "warn", "detail": "no flow reading yet"})
+    quality = rt.gate.state()
+    if quality["mode"] == "degraded":
+        checks.append(
+            {
+                "name": "intake_quality",
+                "status": "fail",
+                "detail": f"meter degraded; valve safe-holding at {rt.intake_valve.position():.4f}",
+            }
+        )
+    elif quality["mode"] == "observing":
+        checks.append(
+            {
+                "name": "intake_quality",
+                "status": "warn",
+                "detail": f"observing suspect readings ({quality['suspect_streak']})",
+            }
+        )
+    else:
+        checks.append({"name": "intake_quality", "status": "ok", "detail": "readings accepted"})
     if rt.stabilizer.is_stable():
         checks.append({"name": "ph", "status": "ok", "detail": "ph in the stable band"})
     else:

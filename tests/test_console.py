@@ -43,6 +43,7 @@ class ConsoleCase(unittest.TestCase):
             "residual",
             "quota",
             "intake",
+            "intake_quality",
             "ph",
             "inventory",
         })
@@ -55,6 +56,10 @@ class ConsoleCase(unittest.TestCase):
                 "pipeline",
                 "store",
                 "intake",
+                "intake_quality",
+                "intake_suspects",
+                "intake_valve",
+                "pump_groups",
                 "coag",
                 "chlor",
                 "filter",

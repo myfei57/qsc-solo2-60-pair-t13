@@ -5,7 +5,7 @@ from __future__ import annotations
 from waterplant.clearwell import validate_level
 from waterplant.filter import validate_zone
 from waterplant.flow import validate_factor
-from waterplant.intake import Sensor, mix, validate_flow
+from waterplant.intake import Sensor, mix
 from waterplant.quota import validate_amount
 
 from .http import Request, Response, json_response
@@ -23,15 +23,16 @@ def run_cycle(rt: Runtime, request: Request) -> Response:
     zone = request.int_field("zone")
     amount = request.float_field("amount")
 
-    validate_flow(flow)
     validate_factor(rt.calibration.current())
     validate_zone(zone)
     validate_amount(amount)
     validate_level(level)
 
-    rt.flow_repository.record(Sensor(flow=flow, turbidity=mix(samples)))
-    rt.trend.record(flow)
-    coag_dose = rt.coag_doser.update_flow_and_dose(flow)
+    # Intake is judged first: spikes and failed-meter readings never reach
+    # dosing, trend or the valve. The valve only reacts after the verdict.
+    intake = rt.acquisition.ingest(Sensor(flow=flow, turbidity=mix(samples)))
+    coag_dose = rt.coag_doser.dose_for_flow(intake.quality.working_flow)
+    rt.auditor.record("coagulant", f"{coag_dose:.4f}")
     turb_dose = rt.sampler.judge(samples)
     ph_verdict = rt.stabilizer.stabilize()
     rt.well.update_residual_demand(demand)
@@ -58,5 +59,8 @@ def run_cycle(rt: Runtime, request: Request) -> Response:
             "audit_count": rt.auditor.count(),
             "ph_stable": ph_verdict.stable,
             "ph_adjustment": ph_verdict.adjustment,
+            "flow_verdict": intake.quality.verdict,
+            "working_flow": intake.quality.working_flow,
+            "valve": intake.valve.as_dict(),
         }
     )

@@ -12,9 +12,15 @@ class FlowState:
     flow: float
     turbidity: float
     present: bool
+    raw: float = 0.0
 
     def as_dict(self) -> dict[str, object]:
-        return {"flow": self.flow, "turbidity": self.turbidity, "present": self.present}
+        return {
+            "flow": self.flow,
+            "raw": self.raw,
+            "turbidity": self.turbidity,
+            "present": self.present,
+        }
 
 
 def validate_flow(value: float) -> None:

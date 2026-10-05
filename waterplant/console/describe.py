@@ -15,6 +15,12 @@ def collect(rt: Runtime) -> dict[str, str]:
         "pipeline": treatment_line().describe(),
         "store": describe_store(rt.store),
         "intake": rt.flow_repository.describe(),
+        "intake_quality": rt.gate.describe(),
+        "intake_valve": (
+            f"intake valve position={rt.intake_valve.position():.4f} "
+            f"mode={rt.intake_valve.mode()}"
+        ),
+        "pump_groups": rt.pump_groups.describe(),
         "coag": rt.coag_doser.describe(),
         "chlor": rt.chlor_doser.describe(),
         "filter": rt.bank.describe(),
